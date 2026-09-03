@@ -49,9 +49,11 @@ workflows:
           # certificate (team already at its distribution-certificate limit);
           # without a profile the later xcodebuild dies with a misleading
           # "requires a provisioning profile" — fail here, clearly, instead.
-          # (the CLI saves profiles under either of these two directories)
-          if ! ls "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision \
-                  "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision >/dev/null 2>&1; then
+          # (the CLI saves profiles under either of these two directories; find
+          # tolerates a missing one, unlike ls with two globs)
+          if ! find "$HOME/Library/MobileDevice/Provisioning Profiles" \
+                    "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+                    -maxdepth 1 -name '*.mobileprovision' 2>/dev/null | grep -q .; then
             echo "No provisioning profile could be obtained for $BUNDLE_ID — usually the"
             echo "Apple team is at its distribution-certificate limit (2) and none of them"
             echo "matches this account's signing key. Revoke an unused distribution"
