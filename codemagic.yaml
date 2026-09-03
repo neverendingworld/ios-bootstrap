@@ -45,6 +45,17 @@ workflows:
           # reuses them afterwards — all inside the user's ASC account.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE --create
+          # fetch-signing-files exits 0 even when Apple refused to issue a
+          # certificate (team already at its distribution-certificate limit);
+          # without a profile the later xcodebuild dies with a misleading
+          # "requires a provisioning profile" — fail here, clearly, instead.
+          if ! ls "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision >/dev/null 2>&1; then
+            echo "No provisioning profile could be obtained for $BUNDLE_ID — usually the"
+            echo "Apple team is at its distribution-certificate limit (2) and none of them"
+            echo "matches this account's signing key. Revoke an unused distribution"
+            echo "certificate in App Store Connect → Certificates, then build again."
+            exit 1
+          fi
           keychain initialize
           keychain add-certificates
           xcode-project use-profiles
