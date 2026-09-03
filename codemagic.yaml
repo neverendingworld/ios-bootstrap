@@ -1,0 +1,70 @@
+# iOS build workflow for user apps — lives in the small bootstrap repo the
+# platform's Codemagic application is connected to (Codemagic builds run
+# against a repo; ours is just this file). tasks_mobile.perform_ios_build
+# triggers it via the Codemagic API and injects EVERYTHING per build:
+# the scaffold URL and the user's own App Store Connect key. Nothing
+# user-specific is stored on Codemagic.
+#
+# Env injected per build (see tasks_mobile.py):
+#   SCAFFOLD_URL                       presigned zip of the Capacitor project
+#   BUNDLE_ID / APP_NAME               app identity
+#   VERSION_NAME / BUILD_NUMBER        also baked into newapp.json
+#   SUBMIT_TO_TESTFLIGHT               "true" on store builds
+#   APP_STORE_CONNECT_KEY_IDENTIFIER   the user's ASC API key…
+#   APP_STORE_CONNECT_ISSUER_ID
+#   APP_STORE_CONNECT_PRIVATE_KEY
+#   CERTIFICATE_PRIVATE_KEY            RSA key backing the signing cert
+
+workflows:
+  newapp-ios:
+    name: NEW user app — iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      node: 20
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Fetch scaffold
+        script: |
+          curl -fsSL "$SCAFFOLD_URL" -o scaffold.zip
+          unzip -q scaffold.zip -d app
+
+      - name: Generate iOS project
+        script: |
+          cd app
+          npm install --no-audit --no-fund
+          npx cap add ios
+          node patch_native.js
+          npx @capacitor/assets generate --ios
+          npx cap sync ios
+
+      - name: Signing (user's Apple account)
+        script: |
+          # Registers the bundle id and mints cert + profile on first run,
+          # reuses them afterwards — all inside the user's ASC account.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE --create
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Build IPA
+        script: |
+          cd app
+          xcode-project build-ipa \
+            --workspace ios/App/App.xcworkspace \
+            --scheme App
+
+      - name: Deliver to TestFlight
+        script: |
+          # `publish` uploads to App Store Connect; the build then appears in
+          # TestFlight (internal testing) once Apple finishes processing.
+          if [ "$SUBMIT_TO_TESTFLIGHT" = "true" ]; then
+            app-store-connect publish --path app/build/ios/ipa/*.ipa
+          else
+            echo "Debug build — skipping TestFlight."
+          fi
+
+    artifacts:
+      - app/build/ios/ipa/*.ipa
